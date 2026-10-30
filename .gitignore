@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch Checkpoints & Large Model Weights (>50MB)
+models/*.pth
+models/*.pt
+models/*.onnx
+models/*.tmp
+
+# Environments & Virtual Envs
+.venv/
+venv/
+ENV/
+env/
+.conda/
+
+# Testing & Caches
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Evaluation Visual Output Artifacts (Keep CSV & Reports)
+outputs/benchmark_visuals/
+outputs/*.tmp
+
+# OS & Editor specific
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

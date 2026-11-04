@@ -24,7 +24,10 @@ htmlcov/
 
 # Evaluation Visual Output Artifacts (Keep CSV & Reports)
 outputs/benchmark_visuals/
+outputs/history/thumbnails/
+outputs/history/enhanced/
 outputs/*.tmp
+app_backup.py
 
 # OS & Editor specific
 .DS_Store

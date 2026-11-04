@@ -120,10 +120,11 @@ def super_resolve(
     model: Optional[nn.Module] = None,
     device: Optional[torch.device] = None,
     use_tiling: bool = False,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    target_scale: int = 4
 ) -> Tuple[np.ndarray, float]:
     """
-    Applies 4x deep learning super-resolution using the ESRGAN RRDBNet model.
+    Applies deep learning super-resolution using the ESRGAN RRDBNet model.
 
     Args:
         image: RGB input image as numpy array (H, W, 3), dtype uint8.
@@ -132,9 +133,10 @@ def super_resolve(
         use_tiling: Whether to force tiled inference. If False, tiling is used automatically
                     only if image dimensions exceed memory thresholds on CPU.
         progress_callback: Optional callback(current_tile, total_tiles, message) for UI progress.
+        target_scale: Desired output upscaling factor (4 for native 4x, or 2 for supersampled 2x).
 
     Returns:
-        Tuple of (sr_image: np.ndarray [H*4, W*4, 3] uint8, elapsed_time_seconds: float)
+        Tuple of (sr_image: np.ndarray uint8, elapsed_time_seconds: float)
     """
     rgb_img = ensure_rgb(image)
     h, w = rgb_img.shape[:2]
@@ -174,5 +176,13 @@ def super_resolve(
     out_np = out_tensor.squeeze(0).clamp(0.0, 1.0).cpu().numpy()
     out_np = np.transpose(out_np, (1, 2, 0))
     sr_image = np.round(out_np * 255.0).astype(np.uint8)
+
+    # If 2x output requested from 4x native model, apply anti-aliased Lanczos decimation
+    if target_scale == 2:
+        from PIL import Image
+        pil_sr = Image.fromarray(sr_image)
+        t_w = max(1, w * 2)
+        t_h = max(1, h * 2)
+        sr_image = np.array(pil_sr.resize((t_w, t_h), resample=Image.Resampling.LANCZOS), dtype=np.uint8)
 
     return sr_image, elapsed_time

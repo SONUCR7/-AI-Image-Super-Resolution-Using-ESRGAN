@@ -71,6 +71,61 @@ def bicubic_upscale(image: np.ndarray, scale: int = 4) -> Tuple[np.ndarray, floa
     return upscaled, elapsed
 
 
+def lanczos_upscale(image: np.ndarray, scale: int = 4) -> Tuple[np.ndarray, float]:
+    """
+    Upscales an input image using classical Lanczos-3 interpolation.
+
+    Lanczos resampling uses a sinc-windowed kernel (filter radius 3, 36 pixel neighborhood)
+    to achieve sharp edge reconstruction and minimize ringing while preserving high frequencies.
+
+    Args:
+        image: Input RGB numpy array (H, W, 3), uint8.
+        scale: Upscaling factor (default 4).
+
+    Returns:
+        Tuple of (upscaled_image: np.ndarray, elapsed_time_seconds: float)
+    """
+    rgb_img = ensure_rgb(image)
+    h, w = rgb_img.shape[:2]
+    target_w = w * scale
+    target_h = h * scale
+
+    start_time = time.perf_counter()
+    pil_img = Image.fromarray(rgb_img)
+    upscaled_pil = pil_img.resize((target_w, target_h), resample=Image.Resampling.LANCZOS)
+    upscaled = np.array(upscaled_pil, dtype=np.uint8)
+    elapsed = time.perf_counter() - start_time
+
+    return upscaled, elapsed
+
+
+def bilinear_upscale(image: np.ndarray, scale: int = 4) -> Tuple[np.ndarray, float]:
+    """
+    Upscales an input image using classical Bilinear interpolation.
+
+    Computes new pixel values from the linear weighted average of the nearest 2x2 (4) pixels.
+
+    Args:
+        image: Input RGB numpy array (H, W, 3), uint8.
+        scale: Upscaling factor (default 4).
+
+    Returns:
+        Tuple of (upscaled_image: np.ndarray, elapsed_time_seconds: float)
+    """
+    rgb_img = ensure_rgb(image)
+    h, w = rgb_img.shape[:2]
+    target_w = w * scale
+    target_h = h * scale
+
+    start_time = time.perf_counter()
+    pil_img = Image.fromarray(rgb_img)
+    upscaled_pil = pil_img.resize((target_w, target_h), resample=Image.Resampling.BILINEAR)
+    upscaled = np.array(upscaled_pil, dtype=np.uint8)
+    elapsed = time.perf_counter() - start_time
+
+    return upscaled, elapsed
+
+
 def degrade_image(hr_image: np.ndarray, scale: int = 4) -> np.ndarray:
     """
     Generates a low-resolution (LR) counterpart from a high-resolution (HR) reference image.

@@ -19,6 +19,7 @@ from typing import Optional, Tuple, Dict, Any, List
 
 import numpy as np
 import pandas as pd
+import torch
 from PIL import Image
 import cv2
 import matplotlib.pyplot as plt
@@ -263,7 +264,7 @@ if "enhancement_meta" not in st.session_state:
     st.session_state.enhancement_meta = None
 
 # Hardware detection
-avail_cuda = config.is_cuda_available()
+avail_cuda = config.is_cuda_available() if hasattr(config, "is_cuda_available") else torch.cuda.is_available()
 hardware_label = "CUDA GPU Acceleration" if avail_cuda else "Multi-Threaded CPU Engine"
 
 

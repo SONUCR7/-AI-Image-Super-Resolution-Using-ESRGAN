@@ -64,6 +64,11 @@ MIN_IMAGE_DIMENSION = 16
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 # Hardware Device Selection
+def is_cuda_available() -> bool:
+    """Returns True if CUDA GPU acceleration is available, else False."""
+    return torch.cuda.is_available()
+
+
 def get_device() -> torch.device:
     """Returns torch.device('cuda') if CUDA is available, else torch.device('cpu')."""
     if torch.cuda.is_available():

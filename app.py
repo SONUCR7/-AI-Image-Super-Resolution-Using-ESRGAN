@@ -13,7 +13,6 @@ import time
 import math
 import json
 import base64
-import zipfile
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 
@@ -48,6 +47,12 @@ from src.history import (
     get_history_stats
 )
 from src.components import render_comparison_slider, image_to_base64
+from src.charts import (
+    create_psnr_chart,
+    create_ssim_chart,
+    create_latency_chart,
+    create_delta_chart
+)
 from scripts.evaluate import run_benchmark
 
 
@@ -237,12 +242,26 @@ st.markdown("""
         border: 1px solid rgba(0, 210, 255, 0.3);
     }
 
+    /* Large Image Canvas Frame */
+    .image-canvas-frame {
+        background: #0A0E17;
+        border: 1px solid rgba(0, 210, 255, 0.2);
+        border-radius: 12px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+        margin-bottom: 16px;
+    }
+
     /* Clean Dividers */
     hr {
         border: 0;
         height: 1px;
         background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-        margin: 28px 0;
+        margin: 26px 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -258,6 +277,10 @@ if "uploaded_image" not in st.session_state:
     st.session_state.uploaded_image = None
 if "uploaded_filename" not in st.session_state:
     st.session_state.uploaded_filename = None
+if "uploaded_filesize" not in st.session_state:
+    st.session_state.uploaded_filesize = None
+if "uploaded_format" not in st.session_state:
+    st.session_state.uploaded_format = None
 if "enhanced_result" not in st.session_state:
     st.session_state.enhanced_result = None
 if "enhancement_meta" not in st.session_state:
@@ -269,7 +292,7 @@ hardware_label = "CUDA GPU Acceleration" if avail_cuda else "Multi-Threaded CPU 
 
 
 # -----------------------------------------------------------------------------
-# 3. Sidebar Navigation & System Telemetry
+# 3. Sidebar Navigation & Refined Quick Test Library (Requirement 4)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -307,40 +330,29 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Quick Test Library (1-Click Reference Samples)
+    # Quick Test Library (Requirement 4: Consistent, Full-Width, No Awkward Wrapping)
     st.markdown("##### 📁 Quick Test Library")
     st.caption("Load a pre-configured reference target instantly:")
 
-    sample_col1, sample_col2, sample_col3 = st.columns(3)
-    with sample_col1:
-        if st.button("🦋 Macro", use_container_width=True, help="Load Butterfly Wing macro sample"):
-            p = config.SAMPLES_DIR / "sample_butterfly.png"
-            if p.exists():
-                st.session_state.uploaded_image = load_image(p)
-                st.session_state.uploaded_filename = "sample_butterfly.png"
-                st.session_state.enhanced_result = None
-                st.session_state.current_page = "✨ Enhance Image"
-                st.rerun()
+    def _load_sample(filename: str, label: str):
+        p = config.SAMPLES_DIR / filename
+        if p.exists():
+            st.session_state.uploaded_image = load_image(p)
+            st.session_state.uploaded_filename = filename
+            st.session_state.uploaded_filesize = f"{round(p.stat().st_size / 1024.0, 1)} KB"
+            st.session_state.uploaded_format = "PNG"
+            st.session_state.enhanced_result = None
+            st.session_state.current_page = "✨ Enhance Image"
+            st.rerun()
 
-    with sample_col2:
-        if st.button("🏞️ Scenery", use_container_width=True, help="Load Landscape scenery sample"):
-            p = config.SAMPLES_DIR / "sample_landscape.png"
-            if p.exists():
-                st.session_state.uploaded_image = load_image(p)
-                st.session_state.uploaded_filename = "sample_landscape.png"
-                st.session_state.enhanced_result = None
-                st.session_state.current_page = "✨ Enhance Image"
-                st.rerun()
+    if st.button("🦋 Butterfly Wing (Macro)", use_container_width=True, help="Load high-frequency butterfly wing macro sample"):
+        _load_sample("sample_butterfly.png", "Macro")
 
-    with sample_col3:
-        if st.button("🏙️ Urban", use_container_width=True, help="Load Urban Architecture sample"):
-            p = config.SAMPLES_DIR / "sample_urban_architecture.png"
-            if p.exists():
-                st.session_state.uploaded_image = load_image(p)
-                st.session_state.uploaded_filename = "sample_urban_architecture.png"
-                st.session_state.enhanced_result = None
-                st.session_state.current_page = "✨ Enhance Image"
-                st.rerun()
+    if st.button("🏞️ Natural Landscape (Scenery)", use_container_width=True, help="Load complex natural landscape sample"):
+        _load_sample("sample_landscape.png", "Scenery")
+
+    if st.button("🏙️ Urban Architecture (Grid)", use_container_width=True, help="Load structured geometric urban facade sample"):
+        _load_sample("sample_urban_architecture.png", "Urban")
 
     st.markdown("---")
 
@@ -358,7 +370,7 @@ with st.sidebar:
 
 
 # =============================================================================
-# SECTION 1: DASHBOARD (Phase 4)
+# SECTION 1: DASHBOARD (Phase 4 & Requirement 5)
 # =============================================================================
 if st.session_state.current_page == "🏠 Dashboard":
     # Hero Section
@@ -465,320 +477,342 @@ if st.session_state.current_page == "🏠 Dashboard":
 
     st.markdown("---")
 
-    # Recent Activity Section
+    # Recent Enhancement Activity Section (Requirement 5)
     st.markdown("### 🕒 Recent Enhancement Activity")
     recent = stats["recent_entries"]
     if recent:
-        rec_cols = st.columns(min(len(recent), 4))
-        for idx, entry in enumerate(recent[:4]):
-            with rec_cols[idx]:
-                enh_path = config.BASE_DIR / entry["enhanced_file"]
+        for entry in recent[:3]:
+            enh_p = config.BASE_DIR / entry["enhanced_file"]
+            orig_thumb_p = config.BASE_DIR / entry["orig_thumb"]
+
+            act_col1, act_col2, act_col3 = st.columns([1, 1, 2])
+            with act_col1:
+                st.caption(f"Original ({entry['orig_width']}×{entry['orig_height']} px)")
+                if orig_thumb_p.exists():
+                    st.image(str(orig_thumb_p), use_container_width=True)
+            with act_col2:
+                st.caption(f"Enhanced {entry['scale_factor']} ({entry['enhanced_width']}×{entry['enhanced_height']} px)")
+                if enh_p.exists():
+                    st.image(str(enh_p), use_container_width=True)
+            with act_col3:
                 st.markdown(f"""
-                <div class="saas-card" style="padding:12px;">
-                    <div style="font-weight:600; font-size:0.84rem; color:#E2E8F0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                        {entry['filename']}
+                <div class="saas-card" style="height:90%;">
+                    <div style="font-weight:700; font-size:1rem; color:#FFFFFF;">{entry['filename']}</div>
+                    <div style="font-size:0.82rem; color:#00D2FF; margin-top:4px;">
+                        Model: <b>{entry['model_name']}</b> • Scale: <b>{entry['scale_factor']}</b>
                     </div>
-                    <div style="font-size:0.72rem; color:#00D2FF; margin-bottom:8px;">
-                        {entry['scale_factor']} • {entry['enhanced_width']}×{entry['enhanced_height']} px • {entry['elapsed_sec']}s
+                    <div style="font-size:0.78rem; color:#94A3B8; margin-top:4px;">
+                        Inference Time: <code>{entry['elapsed_sec']} s</code> • Device: <code>{entry['device']}</code>
+                    </div>
+                    <div style="font-size:0.72rem; color:#64748B; margin-top:4px;">
+                        Date: {entry['timestamp']}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                if enh_path.exists():
-                    st.image(str(enh_path), use_container_width=True)
+            st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
     else:
         st.info("💡 No enhancements recorded in this session yet. Upload or pick a sample image in **Enhance Image** to see live history here!")
 
 
 # =============================================================================
-# SECTION 2: ENHANCE IMAGE WORKSPACE (Phase 5 & 6)
+# SECTION 2: ENHANCE IMAGE WORKSPACE (Requirement 1: Image as Centerpiece)
 # =============================================================================
 elif st.session_state.current_page == "✨ Enhance Image":
     st.markdown("### ✨ Image Super-Resolution Workspace")
-    st.caption("Upload any low-resolution image to synthesize photorealistic high-frequency details using ESRGAN.")
+    st.caption("Upload or select any image to reconstruct sharp, photorealistic high-frequency details using ESRGAN.")
 
-    # Upload & Specifications Section
-    upload_col, config_col = st.columns([1.5, 1.0])
-
-    with upload_col:
+    # 1. Image Upload or Selection Area
+    if st.session_state.uploaded_image is None:
         st.markdown("##### 📤 1. Upload Source Image")
         uploaded_file = st.file_uploader(
             "Drag and drop image here (JPG, JPEG, PNG, WEBP):",
             type=["jpg", "jpeg", "png", "webp"],
-            help="Limit 200MB per file. High-resolution images will be automatically tiled for CPU safety."
+            help="Limit 200MB per file. Memory-safe tiled inference will automatically protect CPU memory."
         )
 
         if uploaded_file is not None:
             try:
                 st.session_state.uploaded_image = load_image(uploaded_file.read())
                 st.session_state.uploaded_filename = uploaded_file.name
+                st.session_state.uploaded_filesize = f"{round(uploaded_file.size / 1024.0, 1)} KB"
+                st.session_state.uploaded_format = uploaded_file.type.split("/")[-1].upper()
                 st.session_state.enhanced_result = None
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ Failed to parse image file: {str(e)}")
 
-        if st.session_state.uploaded_image is not None:
-            img = st.session_state.uploaded_image
-            h, w = img.shape[:2]
-            aspect = round(w / max(1, h), 3)
+        st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+        st.info("💡 Or pick a reference sample directly from the sidebar on the left (`🦋 Butterfly`, `🏞️ Landscape`, `🏙️ Urban`).")
 
-            # Metadata card
+    else:
+        # Image is loaded! Show Header Bar with Specifications and Replace Button
+        raw_img = st.session_state.uploaded_image
+        h, w = raw_img.shape[:2]
+        aspect = round(w / max(1, h), 3)
+
+        spec_c1, spec_c2 = st.columns([4, 1])
+        with spec_c1:
             st.markdown(f"""
-            <div class="saas-card" style="margin-top:12px;">
-                <div class="saas-card-label">Uploaded File Specifications</div>
-                <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:0.86rem; color:#CBD5E1;">
-                    <span><b>File:</b> <code>{st.session_state.uploaded_filename}</code></span>
-                    <span><b>Dimensions:</b> <code>{w} × {h} px</code></span>
-                    <span><b>Aspect Ratio:</b> <code>{aspect}</code></span>
+            <div style="background:rgba(16,22,34,0.7); border:1px solid rgba(0,210,255,0.25); border-radius:10px; padding:10px 16px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+                <div><b>File:</b> <code style="color:#00D2FF;">{st.session_state.uploaded_filename or 'image.png'}</code></div>
+                <div><b>Dimensions:</b> <code>{w} × {h} px</code></div>
+                <div><b>Aspect Ratio:</b> <code>{aspect}</code></div>
+                <div><b>Size:</b> <code>{st.session_state.uploaded_filesize or 'Standard'}</code></div>
+                <div><b>Format:</b> <code>{st.session_state.uploaded_format or 'RGB'}</code></div>
+            </div>
+            """, unsafe_allow_html=True)
+        with spec_c2:
+            if st.button("🗑️ Change Image", use_container_width=True, help="Remove this image and upload another"):
+                st.session_state.uploaded_image = None
+                st.session_state.uploaded_filename = None
+                st.session_state.enhanced_result = None
+                st.session_state.enhancement_meta = None
+                st.rerun()
+
+        st.markdown("---")
+
+        # MAIN VISUAL CANVAS (Requirement 1: Image preview is the main visual element)
+        if st.session_state.enhanced_result is None:
+            # Stage A: Before Enhancement — Show large preview of original image
+            st.markdown("##### 🔍 Source Image Preview (Low-Resolution / Input)")
+            st.image(raw_img, use_container_width=True, caption=f"Original Input ({w} × {h} px)")
+
+            # Enhancement Settings Panel
+            st.markdown("---")
+            st.markdown("##### ⚙️ Enhancement Settings")
+
+            set_c1, set_c2, set_c3, set_c4 = st.columns([1.5, 1.5, 1.2, 1.2])
+
+            with set_c1:
+                selected_scale = st.radio(
+                    "Target Upscaling Factor:",
+                    options=[4, 2],
+                    format_func=lambda s: f"{s}× Super-Resolution ({s*s}× Pixels)" if s == 4 else f"{s}× Supersampled (Lanczos-Filtered)",
+                    index=0,
+                    help="4x uses native RRDBNet upscaling. 2x uses 4x deep inference followed by anti-aliased Lanczos decimation."
+                )
+
+            with set_c2:
+                proc_mode = st.radio(
+                    "Processing Pipeline Mode:",
+                    options=["Full Resolution (Tiled Inference)", "Fast Mode (Interactive Preview)"],
+                    index=0,
+                    help="Full Resolution runs inference on the complete image with memory-safe overlapping tiles. Fast Mode scales a preview copy for rapid inspection."
+                )
+
+            with set_c3:
+                out_format = st.selectbox(
+                    "Export Format:",
+                    options=["PNG (Lossless)", "WEBP (Modern Web)", "JPEG (Standard)"],
+                    index=0
+                )
+
+            with set_c4:
+                out_quality = 95
+                if "PNG" not in out_format:
+                    out_quality = st.slider("Quality:", min_value=60, max_value=100, value=95)
+                else:
+                    st.caption("Lossless 100% Quality")
+
+            # Main Action Button
+            st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+            enhance_btn = st.button("✨ Super-Resolve Image", type="primary", use_container_width=True)
+
+            if enhance_btn:
+                orig_h, orig_w = raw_img.shape[:2]
+
+                # Fast mode optimization
+                if "Fast Mode" in proc_mode and (orig_h > 384 or orig_w > 384):
+                    max_dim = 384
+                    scale_preview = min(max_dim / orig_w, max_dim / orig_h)
+                    pw, ph = int(orig_w * scale_preview), int(orig_h * scale_preview)
+                    pil_down = Image.fromarray(raw_img).resize((pw, ph), Image.Resampling.BICUBIC)
+                    processing_input = np.array(pil_down, dtype=np.uint8)
+                    st.toast("⚡ Fast Mode active: Image optimized for rapid interactive inference.", icon="⚡")
+                else:
+                    processing_input = raw_img
+
+                proc_h, proc_w = processing_input.shape[:2]
+
+                progress_bar = st.progress(0.1)
+                status_msg = st.empty()
+
+                def on_tile_progress(cur, total, msg):
+                    progress_bar.progress(min(0.95, 0.2 + 0.75 * (cur / max(1, total))))
+                    status_msg.text(f"⏳ {msg}")
+
+                try:
+                    status_msg.text("⚙️ Initializing RRDBNet neural network weights...")
+                    progress_bar.progress(0.2)
+
+                    sr_output, elapsed = super_resolve(
+                        image=processing_input,
+                        target_scale=selected_scale,
+                        progress_callback=on_tile_progress
+                    )
+
+                    progress_bar.progress(1.0)
+                    status_msg.empty()
+                    progress_bar.empty()
+
+                    st.session_state.enhanced_result = sr_output
+                    st.session_state.enhancement_meta = {
+                        "orig_w": orig_w,
+                        "orig_h": orig_h,
+                        "proc_w": proc_w,
+                        "proc_h": proc_h,
+                        "out_w": sr_output.shape[1],
+                        "out_h": sr_output.shape[0],
+                        "scale": selected_scale,
+                        "elapsed": elapsed,
+                        "device": config.get_device().type.upper(),
+                        "mode": proc_mode,
+                        "format": out_format,
+                        "quality": out_quality
+                    }
+
+                    # Add to local persistent history
+                    add_history_entry(
+                        original_img=raw_img,
+                        enhanced_img=sr_output,
+                        filename=st.session_state.uploaded_filename or "enhanced_image.png",
+                        scale_factor=selected_scale,
+                        model_name="ESRGAN (RRDBNet)",
+                        elapsed_sec=elapsed,
+                        device=config.get_device().type.upper()
+                    )
+
+                    st.toast(f"✅ Enhancement complete in {elapsed:.2f}s! Logged to History.", icon="🎉")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Super-resolution inference failed: {str(e)}")
+
+        else:
+            # Stage B: After Enhancement — Interactive Workspace with Comparison Slider & Side-by-Side
+            meta = st.session_state.enhancement_meta
+            sr_img = st.session_state.enhanced_result
+
+            # Telemetry Metrics Summary Card
+            st.markdown(f"""
+            <div class="saas-card" style="padding:14px 20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                    <div>
+                        <span class="saas-card-label">Input Resolution:</span>
+                        <code style="font-size:1.1rem; color:#FFFFFF; margin-left:6px;">{meta['orig_w']} × {meta['orig_h']} px</code>
+                    </div>
+                    <div>
+                        <span class="saas-card-label">Enhanced Output:</span>
+                        <code style="font-size:1.1rem; color:#00D2FF; margin-left:6px;">{meta['out_w']} × {meta['out_h']} px ({meta['scale']}×)</code>
+                    </div>
+                    <div>
+                        <span class="saas-card-label">Inference Time:</span>
+                        <code style="font-size:1.1rem; color:#10B981; margin-left:6px;">{meta['elapsed']:.2f} s</code>
+                    </div>
+                    <div>
+                        <span class="saas-card-label">Compute Engine:</span>
+                        <code style="font-size:1.1rem; color:#E2E8F0; margin-left:6px;">{meta['device']}</code>
+                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-    with config_col:
-        st.markdown("##### ⚙️ 2. Enhancement Settings")
+            # View Mode Tabs: Interactive Draggable Slider | Side-by-Side View
+            view_tab1, view_tab2 = st.tabs([
+                "🎚️ Interactive Draggable Slider",
+                "🖼️ Side-by-Side Comparison"
+            ])
 
-        # Scale Factor Selection
-        selected_scale = st.radio(
-            "Target Scaling Factor:",
-            options=[4, 2],
-            format_func=lambda s: f"{s}× Super-Resolution ({s*s}× Pixel Density)" if s == 4 else f"{s}× Supersampled (Lanczos-Filtered)",
-            index=0,
-            help="4x uses native RRDBNet upscaling. 2x uses 4x deep inference followed by anti-aliased Lanczos decimation."
-        )
+            with view_tab1:
+                st.caption("Drag the glowing cyan divider horizontally to compare fine micro-textures against the original image. Use the bottom toolbar for zoom presets and fullscreen.")
+                render_comparison_slider(
+                    img_before=raw_img,
+                    img_after=sr_img,
+                    label_before=f"Original ({meta['orig_w']}×{meta['orig_h']})",
+                    label_after=f"ESRGAN {meta['scale']}× ({meta['out_w']}×{meta['out_h']})",
+                    height=600
+                )
 
-        # Processing Mode Selection
-        proc_mode = st.radio(
-            "Processing Pipeline Mode:",
-            options=["Full Resolution (Tiled Inference)", "Fast Mode (Interactive Preview)"],
-            index=0,
-            help="Full Resolution runs inference on the complete image with memory-safe overlapping tiles. Fast Mode scales a preview copy for rapid inspection."
-        )
+            with view_tab2:
+                side_c1, side_c2 = st.columns(2)
+                with side_c1:
+                    st.markdown(f"**Original Source Image ({meta['orig_w']} × {meta['orig_h']} px)**")
+                    st.image(raw_img, use_container_width=True)
+                with side_c2:
+                    st.markdown(f"**ESRGAN Reconstructed Output ({meta['out_w']} × {meta['out_h']} px)**")
+                    st.image(sr_img, use_container_width=True)
 
-        # Output Format Selection
-        out_format = st.selectbox(
-            "Output Format:",
-            options=["PNG (Lossless)", "WEBP (Modern Web)", "JPEG (Standard)"],
-            index=0
-        )
+            # Download & Re-enhance Controls Bar
+            st.markdown("---")
+            st.markdown("##### 💾 Download & Export Options")
+            dl_col1, dl_col2, dl_col3, dl_col4 = st.columns([1.5, 1.5, 1.5, 1.5])
 
-        # Quality slider for lossy formats
-        out_quality = 95
-        if "PNG" not in out_format:
-            out_quality = st.slider("Compression Quality:", min_value=60, max_value=100, value=95)
+            # Prepare format buffer
+            dl_pil = Image.fromarray(sr_img)
+            dl_buf = io.BytesIO()
+            out_fmt = meta.get("format", "PNG (Lossless)")
+            out_qual = meta.get("quality", 95)
 
-        # Enhance Action Button
-        st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
-        enhance_btn = st.button("✨ Enhance Image", type="primary", use_container_width=True, disabled=(st.session_state.uploaded_image is None))
+            if "WEBP" in out_fmt:
+                dl_pil.save(dl_buf, format="WEBP", quality=out_qual)
+                m_type = "image/webp"
+                f_ext = "webp"
+            elif "JPEG" in out_fmt:
+                dl_pil.save(dl_buf, format="JPEG", quality=out_qual)
+                m_type = "image/jpeg"
+                f_ext = "jpg"
+            else:
+                dl_pil.save(dl_buf, format="PNG", optimize=True)
+                m_type = "image/png"
+                f_ext = "png"
 
-    # Enhancement Execution Pipeline (Phase 6)
-    if enhance_btn and st.session_state.uploaded_image is not None:
-        raw_img = st.session_state.uploaded_image
-        orig_h, orig_w = raw_img.shape[:2]
+            stem_name = Path(st.session_state.uploaded_filename or "enhanced").stem
+            out_filename = f"{stem_name}_ESRGAN_{meta['scale']}x.{f_ext}"
+            filesize_kb = round(len(dl_buf.getvalue()) / 1024.0, 1)
 
-        # Handle Fast Mode optimization
-        if "Fast Mode" in proc_mode and (orig_h > 384 or orig_w > 384):
-            max_dim = 384
-            scale_preview = min(max_dim / orig_w, max_dim / orig_h)
-            pw, ph = int(orig_w * scale_preview), int(orig_h * scale_preview)
-            pil_down = Image.fromarray(raw_img).resize((pw, ph), Image.Resampling.BICUBIC)
-            processing_input = np.array(pil_down, dtype=np.uint8)
-            st.toast("⚡ Fast Mode active: Image optimized for rapid interactive inference.", icon="⚡")
-        else:
-            processing_input = raw_img
+            with dl_col1:
+                st.download_button(
+                    f"⬇️ Download {f_ext.upper()} ({filesize_kb} KB)",
+                    data=dl_buf.getvalue(),
+                    file_name=out_filename,
+                    mime=m_type,
+                    type="primary",
+                    use_container_width=True
+                )
 
-        proc_h, proc_w = processing_input.shape[:2]
+            with dl_col2:
+                bic_img, _ = bicubic_upscale(raw_img, scale=meta['scale'])
+                bic_buf = io.BytesIO()
+                Image.fromarray(bic_img).save(bic_buf, format="PNG")
+                st.download_button(
+                    "⬇️ Download Bicubic Baseline",
+                    data=bic_buf.getvalue(),
+                    file_name=f"{stem_name}_Bicubic_{meta['scale']}x.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
 
-        # Real Progress Feedback
-        progress_bar = st.progress(0.1)
-        status_msg = st.empty()
+            with dl_col3:
+                if st.button("🔄 Re-Enhance with Different Settings", use_container_width=True):
+                    st.session_state.enhanced_result = None
+                    st.rerun()
 
-        def on_tile_progress(cur, total, msg):
-            progress_bar.progress(min(0.95, 0.2 + 0.75 * (cur / max(1, total))))
-            status_msg.text(f"⏳ {msg}")
-
-        try:
-            status_msg.text("⚙️ Initializing RRDBNet neural network weights...")
-            progress_bar.progress(0.2)
-
-            # Execute real inference
-            sr_output, elapsed = super_resolve(
-                image=processing_input,
-                target_scale=selected_scale,
-                progress_callback=on_tile_progress
-            )
-
-            progress_bar.progress(1.0)
-            status_msg.empty()
-            progress_bar.empty()
-
-            st.session_state.enhanced_result = sr_output
-            st.session_state.enhancement_meta = {
-                "orig_w": orig_w,
-                "orig_h": orig_h,
-                "proc_w": proc_w,
-                "proc_h": proc_h,
-                "out_w": sr_output.shape[1],
-                "out_h": sr_output.shape[0],
-                "scale": selected_scale,
-                "elapsed": elapsed,
-                "device": config.get_device().type.upper(),
-                "mode": proc_mode
-            }
-
-            # Save to persistent history
-            add_history_entry(
-                original_img=raw_img,
-                enhanced_img=sr_output,
-                filename=st.session_state.uploaded_filename or "enhanced_image.png",
-                scale_factor=selected_scale,
-                model_name="ESRGAN (RRDBNet)",
-                elapsed_sec=elapsed,
-                device=config.get_device().type.upper()
-            )
-
-            st.toast(f"✅ Enhancement complete in {elapsed:.2f}s! Logged to History.", icon="🎉")
-
-        except Exception as e:
-            st.error(f"❌ Super-resolution inference failed: {str(e)}")
-
-    # Display Results Workspace (Phase 5: Comparison Slider & Downloads)
-    if st.session_state.enhanced_result is not None and st.session_state.enhancement_meta is not None:
-        meta = st.session_state.enhancement_meta
-        sr_img = st.session_state.enhanced_result
-        orig_img = st.session_state.uploaded_image
-
-        st.markdown("---")
-        st.markdown("#### 🏆 Enhancement Results & Telemetry")
-
-        # Telemetry metrics row
-        m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            st.markdown(f"""
-            <div class="saas-card">
-                <div class="saas-card-label">Uploaded Res</div>
-                <div class="saas-card-val" style="font-size:1.25rem;">{meta['orig_w']}×{meta['orig_h']}</div>
-                <div class="saas-card-sub">Input Dimensions</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with m2:
-            st.markdown(f"""
-            <div class="saas-card">
-                <div class="saas-card-label">Processing Res</div>
-                <div class="saas-card-val" style="font-size:1.25rem;">{meta['proc_w']}×{meta['proc_h']}</div>
-                <div class="saas-card-sub">{meta['mode'].split()[0]} Mode</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with m3:
-            st.markdown(f"""
-            <div class="saas-card">
-                <div class="saas-card-label">Enhanced Output</div>
-                <div class="saas-card-val" style="font-size:1.25rem; color:#00D2FF;">{meta['out_w']}×{meta['out_h']}</div>
-                <div class="saas-card-sub">{meta['scale']}× Super-Resolution</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with m4:
-            st.markdown(f"""
-            <div class="saas-card">
-                <div class="saas-card-label">Inference Latency</div>
-                <div class="saas-card-val" style="font-size:1.25rem;">{meta['elapsed']:.2f} s</div>
-                <div class="saas-card-sub">{meta['device']} Engine</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with m5:
-            # Calculate output byte size
-            out_pil = Image.fromarray(sr_img)
-            b_buf = io.BytesIO()
-            out_pil.save(b_buf, format="PNG")
-            size_mb = round(len(b_buf.getvalue()) / (1024 * 1024), 2)
-            st.markdown(f"""
-            <div class="saas-card">
-                <div class="saas-card-label">File Size</div>
-                <div class="saas-card-val" style="font-size:1.25rem;">{size_mb} MB</div>
-                <div class="saas-card-sub">Lossless PNG</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # Interactive Comparison Slider (Phase 5)
-        st.markdown("##### 🎚️ Interactive Before / After Split Slider")
-        st.caption("Drag the glowing cyan divider horizontally to inspect micro-texture reconstruction against the original image.")
-
-        render_comparison_slider(
-            img_before=orig_img,
-            img_after=sr_img,
-            label_before=f"Original ({meta['orig_w']}×{meta['orig_h']})",
-            label_after=f"ESRGAN {meta['scale']}× ({meta['out_w']}×{meta['out_h']})",
-            height=580
-        )
-
-        # Side-by-side view toggle & download bar
-        with st.expander("🖼️ View Side-by-Side Images & Export"):
-            v_col1, v_col2 = st.columns(2)
-            with v_col1:
-                st.markdown(f"**Original Image ({meta['orig_w']}×{meta['orig_h']} px)**")
-                st.image(orig_img, use_container_width=True)
-
-            with v_col2:
-                st.markdown(f"**Enhanced Output ({meta['out_w']}×{meta['out_h']} px)**")
-                st.image(sr_img, use_container_width=True)
-
-        # Download Panel
-        st.markdown("##### 💾 Download Enhanced Image")
-        d_col1, d_col2, d_col3 = st.columns([1.5, 1.5, 3])
-
-        # Prepare formatted buffer
-        dl_pil = Image.fromarray(sr_img)
-        dl_buf = io.BytesIO()
-
-        if "WEBP" in out_format:
-            dl_pil.save(dl_buf, format="WEBP", quality=out_quality)
-            mime_type = "image/webp"
-            ext = "webp"
-        elif "JPEG" in out_format:
-            dl_pil.save(dl_buf, format="JPEG", quality=out_quality)
-            mime_type = "image/jpeg"
-            ext = "jpg"
-        else:
-            dl_pil.save(dl_buf, format="PNG", optimize=True)
-            mime_type = "image/png"
-            ext = "png"
-
-        stem_name = Path(st.session_state.uploaded_filename or "enhanced").stem
-        out_filename = f"{stem_name}_ESRGAN_{meta['scale']}x.{ext}"
-
-        with d_col1:
-            st.download_button(
-                f"⬇️ Download {ext.upper()} ({round(len(dl_buf.getvalue())/1024, 1)} KB)",
-                data=dl_buf.getvalue(),
-                file_name=out_filename,
-                mime=mime_type,
-                type="primary",
-                use_container_width=True
-            )
-
-        with d_col2:
-            # Also offer Bicubic PNG baseline for side-by-side proof
-            bic_img, _ = bicubic_upscale(orig_img, scale=meta['scale'])
-            bic_buf = io.BytesIO()
-            Image.fromarray(bic_img).save(bic_buf, format="PNG")
-            st.download_button(
-                "⬇️ Download Bicubic Baseline",
-                data=bic_buf.getvalue(),
-                file_name=f"{stem_name}_Bicubic_{meta['scale']}x.png",
-                mime="image/png",
-                use_container_width=True
-            )
+            with dl_col4:
+                if st.button("✨ Upload New Image", use_container_width=True):
+                    st.session_state.uploaded_image = None
+                    st.session_state.uploaded_filename = None
+                    st.session_state.enhanced_result = None
+                    st.session_state.enhancement_meta = None
+                    st.rerun()
 
 
 # =============================================================================
-# SECTION 3: COMPARE METHODS LAB (Phase 7)
+# SECTION 3: COMPARE METHODS LAB (Requirement 3: Individual Output Cards & Metrics)
 # =============================================================================
 elif st.session_state.current_page == "⚖️ Compare Methods":
     st.markdown("### ⚖️ Multi-Method Super-Resolution Laboratory")
     st.caption("Benchmark deep-learning ESRGAN against classical interpolation algorithms (Lanczos, Bicubic, Bilinear) with real latency and residual divergence heatmaps.")
 
-    # Image source selection
     comp_src = st.radio(
         "Comparison Target Source:",
         options=["Use Currently Uploaded Image", "Load Quick Reference Target"],
@@ -807,13 +841,9 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
 
         if st.button("🚀 Execute Multi-Method Comparison", type="primary"):
             with st.spinner("Executing 4x super-resolution across all 4 algorithms..."):
-                # 1. Bilinear
                 bilinear_out, bilinear_time = bilinear_upscale(comp_image, scale=4)
-                # 2. Bicubic
                 bicubic_out, bicubic_time = bicubic_upscale(comp_image, scale=4)
-                # 3. Lanczos
                 lanczos_out, lanczos_time = lanczos_upscale(comp_image, scale=4)
-                # 4. ESRGAN
                 esrgan_out, esrgan_time = super_resolve(comp_image, target_scale=4)
 
                 st.session_state.comp_results = {
@@ -828,37 +858,77 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
             results = st.session_state.comp_results
 
             st.markdown("---")
-            st.markdown("#### 🖼️ 4-Way Method Visual Gallery")
+            st.markdown("#### 🖼️ Individual Method Comparison Cards (Requirement 3)")
 
             col_bil, col_bic, col_lan, col_esr = st.columns(4)
 
             with col_bil:
                 img_bil, time_bil = results["Bilinear"]
-                st.markdown("##### 1. Bilinear")
-                st.caption(f"Time: `{time_bil*1000:.1f} ms` | 2×2 Grid")
+                st.markdown(f"""
+                <div class="saas-card" style="padding:12px;">
+                    <div style="font-weight:700; color:#FFFFFF;">1. Bilinear</div>
+                    <div style="font-size:0.75rem; color:#94A3B8;">Linear 2×2 Grid</div>
+                    <div style="font-size:0.8rem; color:#00D2FF; margin-top:4px;">
+                        Time: <code>{time_bil*1000:.1f} ms</code> • <code>{img_bil.shape[1]}×{img_bil.shape[0]}</code>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 st.image(img_bil, use_container_width=True)
+                buf_bil = io.BytesIO()
+                Image.fromarray(img_bil).save(buf_bil, format="PNG")
+                st.download_button("⬇️ Download PNG", data=buf_bil.getvalue(), file_name=f"{Path(comp_name).stem}_Bilinear_4x.png", mime="image/png", use_container_width=True, key="dl_bil")
 
             with col_bic:
                 img_bic, time_bic = results["Bicubic"]
-                st.markdown("##### 2. Bicubic")
-                st.caption(f"Time: `{time_bic*1000:.1f} ms` | 4×4 Spline")
+                st.markdown(f"""
+                <div class="saas-card" style="padding:12px;">
+                    <div style="font-weight:700; color:#FFFFFF;">2. Bicubic</div>
+                    <div style="font-size:0.75rem; color:#94A3B8;">Cubic 4×4 Spline</div>
+                    <div style="font-size:0.8rem; color:#00D2FF; margin-top:4px;">
+                        Time: <code>{time_bic*1000:.1f} ms</code> • <code>{img_bic.shape[1]}×{img_bic.shape[0]}</code>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 st.image(img_bic, use_container_width=True)
+                buf_bic = io.BytesIO()
+                Image.fromarray(img_bic).save(buf_bic, format="PNG")
+                st.download_button("⬇️ Download PNG", data=buf_bic.getvalue(), file_name=f"{Path(comp_name).stem}_Bicubic_4x.png", mime="image/png", use_container_width=True, key="dl_bic")
 
             with col_lan:
                 img_lan, time_lan = results["Lanczos"]
-                st.markdown("##### 3. Lanczos-3")
-                st.caption(f"Time: `{time_lan*1000:.1f} ms` | Sinc Filter")
+                st.markdown(f"""
+                <div class="saas-card" style="padding:12px;">
+                    <div style="font-weight:700; color:#FFFFFF;">3. Lanczos-3</div>
+                    <div style="font-size:0.75rem; color:#94A3B8;">Sinc Windowed (36 px)</div>
+                    <div style="font-size:0.8rem; color:#00D2FF; margin-top:4px;">
+                        Time: <code>{time_lan*1000:.1f} ms</code> • <code>{img_lan.shape[1]}×{img_lan.shape[0]}</code>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 st.image(img_lan, use_container_width=True)
+                buf_lan = io.BytesIO()
+                Image.fromarray(img_lan).save(buf_lan, format="PNG")
+                st.download_button("⬇️ Download PNG", data=buf_lan.getvalue(), file_name=f"{Path(comp_name).stem}_Lanczos_4x.png", mime="image/png", use_container_width=True, key="dl_lan")
 
             with col_esr:
                 img_esr, time_esr = results["ESRGAN"]
-                st.markdown("##### 4. ESRGAN (Deep)")
-                st.caption(f"Time: `{time_esr:.2f} s` | 23 RRDB Blocks")
+                st.markdown(f"""
+                <div class="saas-card" style="padding:12px; border-color:rgba(0,210,255,0.4);">
+                    <div style="font-weight:700; color:#00D2FF;">4. ESRGAN (Deep)</div>
+                    <div style="font-size:0.75rem; color:#94A3B8;">23 RRDB Blocks (16.7M)</div>
+                    <div style="font-size:0.8rem; color:#10B981; margin-top:4px;">
+                        Time: <code>{time_esr:.2f} s</code> • <code>{img_esr.shape[1]}×{img_esr.shape[0]}</code>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 st.image(img_esr, use_container_width=True)
+                buf_esr = io.BytesIO()
+                Image.fromarray(img_esr).save(buf_esr, format="PNG")
+                st.download_button("⬇️ Download PNG", data=buf_esr.getvalue(), file_name=f"{Path(comp_name).stem}_ESRGAN_4x.png", mime="image/png", type="primary", use_container_width=True, key="dl_esr")
 
             # Pairwise Comparison Slider (Compare Any Two Methods)
             st.markdown("---")
-            st.markdown("#### 🎚️ Pairwise Comparison Slider")
+            st.markdown("#### 🎚️ Interactive Pairwise Slider (Compare Any Two Methods)")
             st.caption("Select any two methods to compare directly in the interactive draggable slider:")
 
             pair_c1, pair_c2 = st.columns(2)
@@ -884,8 +954,6 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
                 "relative to the low-frequency bicubic baseline."
             )
 
-            img_esr = results["ESRGAN"][0]
-            img_bic = results["Bicubic"][0]
             diff = np.abs(img_esr.astype(np.float32) - img_bic.astype(np.float32))
             diff_gray = np.mean(diff, axis=-1)
 
@@ -901,7 +969,7 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
             st.pyplot(fig)
             plt.close(fig)
 
-            # Interactive Plotly Latency Comparison Chart
+            # Latency Bar Chart
             st.markdown("---")
             st.markdown("#### ⚡ Latency & Computational Profile")
 
@@ -911,7 +979,6 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
                 {"Algorithm": "Lanczos-3", "Latency (ms)": results["Lanczos"][1] * 1000, "Paradigm": "Classical"},
                 {"Algorithm": "ESRGAN (CPU)", "Latency (ms)": results["ESRGAN"][1] * 1000, "Paradigm": "Deep GAN (16.7M)"}
             ]
-            df_timing = pd.DataFrame(timing_data)
 
             fig_time = go.Figure()
             colors = {"Classical": "#3A86FF", "Deep GAN (16.7M)": "#00D2FF"}
@@ -942,7 +1009,7 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
 
 
 # =============================================================================
-# SECTION 4: EVALUATION LAB (Phase 8)
+# SECTION 4: EVALUATION LAB (Requirement 2: Fix Chart Rendering & Add 4 Charts)
 # =============================================================================
 elif st.session_state.current_page == "📊 Evaluation Lab":
     st.markdown("### 📊 Quantitative Evaluation Lab & Benchmark Experiments")
@@ -1024,34 +1091,40 @@ elif st.session_state.current_page == "📊 Evaluation Lab":
             </div>
             """, unsafe_allow_html=True)
 
-        # Interactive Plotly Chart of Benchmark Results
+        # 4 PROPERLY RENDERED CHARTS (Requirement 2: Guaranteed zero grey box)
         st.markdown("---")
-        st.markdown("#### 📊 Per-Image PSNR Performance Comparison")
+        st.markdown("#### 📊 Empirical Benchmark Visualizations (25 Reference Targets)")
 
-        fig_psnr = go.Figure()
-        fig_psnr.add_trace(go.Bar(
-            x=[p.replace("eval_", "").replace(".png", "") for p in df_bench["Image"]],
-            y=df_bench["Bicubic_PSNR_Y_dB"],
-            name="Bicubic Baseline",
-            marker_color="#3A86FF"
-        ))
-        fig_psnr.add_trace(go.Bar(
-            x=[p.replace("eval_", "").replace(".png", "") for p in df_bench["Image"]],
-            y=df_bench["ESRGAN_PSNR_Y_dB"],
-            name="ESRGAN (RRDBNet)",
-            marker_color="#00D2FF"
-        ))
-        fig_psnr.update_layout(
-            barmode="group",
-            template="plotly_dark",
-            paper_bgcolor="rgba(16,22,34,0.7)",
-            plot_bgcolor="rgba(16,22,34,0.7)",
-            font=dict(color="#F8FAFC"),
-            yaxis_title="PSNR (Y-Channel dB)",
-            xaxis_tickangle=-45,
-            height=420
-        )
-        st.plotly_chart(fig_psnr, use_container_width=True)
+        chart_tab1, chart_tab2, chart_tab3, chart_tab4 = st.tabs([
+            "1. 📈 PSNR Comparison",
+            "2. 📐 SSIM Comparison",
+            "3. ⚡ Latency Profile",
+            "4. ⚖️ Perception-Distortion Delta"
+        ])
+
+        with chart_tab1:
+            st.caption("Per-image Peak Signal-to-Noise Ratio (dB) on the Luminance Y-Channel. Dashed lines denote benchmark suite means.")
+            fig_psnr = create_psnr_chart(df_bench)
+            st.pyplot(fig_psnr, use_container_width=True)
+            plt.close(fig_psnr)
+
+        with chart_tab2:
+            st.caption("Structural Similarity Index Measure (SSIM) quantifying luminance, contrast, and structure preservation.")
+            fig_ssim = create_ssim_chart(df_bench)
+            st.pyplot(fig_ssim, use_container_width=True)
+            plt.close(fig_ssim)
+
+        with chart_tab3:
+            st.caption("Inference execution latency per 384×384 output on multi-threaded CPU hardware.")
+            fig_lat = create_latency_chart(df_bench)
+            st.pyplot(fig_lat, use_container_width=True)
+            plt.close(fig_lat)
+
+        with chart_tab4:
+            st.caption("Differential PSNR (ESRGAN - Bicubic). Green bars highlight structural gains up to +10 dB. Amber bars reflect the Perception-Distortion Trade-off on stochastic textures.")
+            fig_delta = create_delta_chart(df_bench)
+            st.pyplot(fig_delta, use_container_width=True)
+            plt.close(fig_delta)
 
         # 4-Way Visual Comparison Explorer
         st.markdown("---")
@@ -1123,7 +1196,7 @@ elif st.session_state.current_page == "📊 Evaluation Lab":
 
 
 # =============================================================================
-# SECTION 5: PROCESSING HISTORY (Phase 9)
+# SECTION 5: PROCESSING HISTORY (Requirement 6: Persistent Gallery & Delete Confirmation)
 # =============================================================================
 elif st.session_state.current_page == "🕒 Processing History":
     st.markdown("### 🕒 Image Enhancement History")
@@ -1137,10 +1210,26 @@ elif st.session_state.current_page == "🕒 Processing History":
 
     with h_top2:
         if history_records:
-            if st.button("🗑️ Clear All History", type="secondary", use_container_width=True):
-                clear_history()
-                st.toast("🧹 History cleared successfully!", icon="🗑️")
-                st.rerun()
+            if "confirm_clear" not in st.session_state:
+                st.session_state.confirm_clear = False
+
+            if not st.session_state.confirm_clear:
+                if st.button("🗑️ Clear All History", type="secondary", use_container_width=True):
+                    st.session_state.confirm_clear = True
+                    st.rerun()
+            else:
+                st.warning("⚠️ Confirm clearing all history?")
+                c_yes, c_no = st.columns(2)
+                with c_yes:
+                    if st.button("Yes, Clear", type="primary", use_container_width=True):
+                        clear_history()
+                        st.session_state.confirm_clear = False
+                        st.toast("🧹 History cleared successfully!", icon="🗑️")
+                        st.rerun()
+                with c_no:
+                    if st.button("Cancel", use_container_width=True):
+                        st.session_state.confirm_clear = False
+                        st.rerun()
 
     if not history_records:
         st.markdown("""
@@ -1157,13 +1246,10 @@ elif st.session_state.current_page == "🕒 Processing History":
             rec_id = entry["id"]
             enh_path = config.BASE_DIR / entry["enhanced_file"]
             orig_thumb = config.BASE_DIR / entry["orig_thumb"]
+            enh_thumb = config.BASE_DIR / entry["enh_thumb"]
 
             st.markdown(f"""
             <div class="history-card">
-                <div style="flex-shrink:0;">
-                    <img src="{image_to_base64(load_image(orig_thumb), 'WEBP') if orig_thumb.exists() else ''}" 
-                         style="width:90px; height:90px; object-fit:cover; border-radius:8px; border:1px solid rgba(255,255,255,0.1);" />
-                </div>
                 <div style="flex-grow:1;">
                     <div style="font-weight:700; font-size:1.05rem; color:#FFFFFF;">{entry['filename']}</div>
                     <div style="font-size:0.82rem; color:#00D2FF; margin-top:3px;">
@@ -1181,8 +1267,18 @@ elif st.session_state.current_page == "🕒 Processing History":
             </div>
             """, unsafe_allow_html=True)
 
-            c_dl, c_del, c_sp = st.columns([1.5, 1.0, 4.5])
-            with c_dl:
+            # Thumbnail Comparison Preview & Actions
+            th_c1, th_c2, th_c3 = st.columns([1, 1, 2])
+            with th_c1:
+                st.caption(f"Original ({entry['orig_width']}×{entry['orig_height']})")
+                if orig_thumb.exists():
+                    st.image(str(orig_thumb), use_container_width=True)
+            with th_c2:
+                st.caption(f"Enhanced ({entry['enhanced_width']}×{entry['enhanced_height']})")
+                if enh_thumb.exists():
+                    st.image(str(enh_thumb), use_container_width=True)
+            with th_c3:
+                st.markdown("<div style='margin-top:14px;'></div>", unsafe_allow_html=True)
                 if enh_path.exists():
                     st.download_button(
                         f"⬇️ Download PNG ({entry['filesize_kb']} KB)",
@@ -1191,13 +1287,12 @@ elif st.session_state.current_page == "🕒 Processing History":
                         mime="image/png",
                         key=f"dl_{rec_id}"
                     )
-            with c_del:
-                if st.button("Delete", key=f"del_{rec_id}"):
+                if st.button("Delete Record", key=f"del_{rec_id}"):
                     delete_history_entry(rec_id)
                     st.toast("Record deleted.", icon="🗑️")
                     st.rerun()
 
-            st.markdown("<div style='margin-bottom:14px;'></div>", unsafe_allow_html=True)
+            st.markdown("<hr style='margin:16px 0;' />", unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -1207,7 +1302,6 @@ elif st.session_state.current_page == "📖 About Project":
     st.markdown("### 📖 About SR Vision Lab & Technical Foundations")
     st.caption("Comprehensive Computer Vision & Image Processing (CVIP) foundations, network architecture, and loss formulation.")
 
-    # Section 1: CVIP Syllabus Foundations
     with st.expander("📘 1. Fundamental CVIP Syllabus Concepts", expanded=True):
         st.markdown(r"""
         #### 1. Image Sampling, Aliasing & Downsampling
@@ -1224,7 +1318,6 @@ elif st.session_state.current_page == "📖 About Project":
           $$L(x) = \begin{cases} \text{sinc}(x) \cdot \text{sinc}(x/a) & \text{if } |x| < a \\ 0 & \text{otherwise} \end{cases}$$
         """)
 
-    # Section 2: Deep Learning Super-Resolution Evolution
     with st.expander("🧠 2. Evolution of Deep Super-Resolution Networks"):
         st.markdown("""
         | Architecture | Authors & Year | Layers / Blocks | Loss Function | Primary Innovation |
@@ -1235,7 +1328,6 @@ elif st.session_state.current_page == "📖 About Project":
         | **ESRGAN** | Wang et al., 2018 | 23 RRDB Blocks | Perceptual + Relativistic GAN | Removed Batch Normalization, added dense residual connections |
         """)
 
-    # Section 3: RRDBNet Architecture Deep Dive
     with st.expander("🏗️ 3. RRDBNet Generator Architecture Deep Dive"):
         st.markdown(r"""
         #### Residual-in-Residual Dense Block (RRDB)
@@ -1247,7 +1339,6 @@ elif st.session_state.current_page == "📖 About Project":
         4. **Sub-Pixel Convolutional Upsampling:** Replaces checkerboard-prone deconvolution with nearest-neighbor interpolation followed by $3\times3$ convolutions (`upconv1`, `upconv2`).
         """)
 
-    # Section 4: Multi-Task Loss Functions
     with st.expander("📐 4. Multi-Task Loss Function Formulation"):
         st.markdown(r"""
         ESRGAN optimizes a compound loss balancing pixel fidelity, perceptual feature alignment, and adversarial realism:
@@ -1262,7 +1353,6 @@ elif st.session_state.current_page == "📖 About Project":
            $$\mathcal{L}_1 = \|I_{HR} - I_{SR}\|_1$$
         """)
 
-    # Section 5: The Perception-Distortion Trade-off
     with st.expander("⚖️ 5. The Perception-Distortion Trade-off (Blau & Michaeli, CVPR 2018)"):
         st.markdown(r"""
         A fundamental mathematical theorem in Computer Vision dictates that **Perceptual Quality (realism)** and **Distortion (PSNR / MSE)** are fundamentally at odds:

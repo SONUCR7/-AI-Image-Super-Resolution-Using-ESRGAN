@@ -37,7 +37,7 @@ from src.image_processing import (
     save_image
 )
 from src.inference import super_resolve, estimate_tiles
-from src.metrics import calculate_psnr, calculate_ssim, calculate_metrics
+from src.metrics import calculate_psnr, calculate_ssim, evaluate_pair, calculate_metrics
 from src.model_loader import get_cached_model, load_esrgan_model
 from src.history import (
     load_history,

@@ -174,3 +174,7 @@ def evaluate_pair(
     if lpips_val is not None:
         metrics["lpips"] = lpips_val
     return metrics
+
+
+# Alias for backward-compatibility
+calculate_metrics = evaluate_pair

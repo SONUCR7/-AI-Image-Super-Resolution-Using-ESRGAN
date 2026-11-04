@@ -22,7 +22,6 @@ import pandas as pd
 from PIL import Image
 import cv2
 import matplotlib.pyplot as plt
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -913,23 +912,28 @@ elif st.session_state.current_page == "⚖️ Compare Methods":
             ]
             df_timing = pd.DataFrame(timing_data)
 
-            fig_time = px.bar(
-                df_timing,
-                x="Algorithm",
-                y="Latency (ms)",
-                color="Paradigm",
-                text="Latency (ms)",
-                color_discrete_map={"Classical": "#3A86FF", "Deep GAN (16.7M)": "#00D2FF"},
-                title="Inference Latency Profile (Logarithmic Scale)"
-            )
+            fig_time = go.Figure()
+            colors = {"Classical": "#3A86FF", "Deep GAN (16.7M)": "#00D2FF"}
+            for item in timing_data:
+                fig_time.add_trace(go.Bar(
+                    x=[item["Algorithm"]],
+                    y=[item["Latency (ms)"]],
+                    name=item["Paradigm"],
+                    text=[f"{item['Latency (ms)']:.1f} ms"],
+                    textposition="outside",
+                    marker_color=colors[item["Paradigm"]],
+                    showlegend=(item["Algorithm"] in ["Bilinear", "ESRGAN (CPU)"])
+                ))
             fig_time.update_layout(
                 yaxis_type="log",
                 template="plotly_dark",
                 paper_bgcolor="rgba(16,22,34,0.7)",
                 plot_bgcolor="rgba(16,22,34,0.7)",
-                font=dict(color="#F8FAFC")
+                font=dict(color="#F8FAFC"),
+                title="Inference Latency Profile (Logarithmic Scale)",
+                yaxis_title="Latency (ms - log scale)",
+                height=380
             )
-            fig_time.update_traces(texttemplate='%{text:.1f} ms', textposition='outside')
             st.plotly_chart(fig_time, use_container_width=True)
 
     else:

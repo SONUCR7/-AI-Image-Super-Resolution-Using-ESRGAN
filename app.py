@@ -54,6 +54,19 @@ from src.charts import (
     create_delta_chart
 )
 from scripts.evaluate import run_benchmark
+from src.auth_views import (
+    render_unauthenticated_sidebar,
+    render_welcome_page,
+    render_signin_page,
+    render_register_page,
+    render_forgot_password_page,
+    render_authenticated_user_sidebar,
+    render_profile_settings_page
+)
+from src.database import init_db
+
+# Initialize multi-user SQLite database schema
+init_db()
 
 
 # -----------------------------------------------------------------------------
@@ -268,8 +281,15 @@ st.markdown("""
 
 
 # -----------------------------------------------------------------------------
-# 2. Session State Initialization
+# 2. Session State Initialization & Security State
 # -----------------------------------------------------------------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "auth_mode" not in st.session_state:
+    st.session_state.auth_mode = "welcome"
+
 if "current_page" not in st.session_state:
     st.session_state.current_page = "🏠 Dashboard"
 
@@ -292,7 +312,23 @@ hardware_label = "CUDA GPU Acceleration" if avail_cuda else "Multi-Threaded CPU 
 
 
 # -----------------------------------------------------------------------------
-# 3. Sidebar Navigation & Refined Quick Test Library (Requirement 4)
+# Unauthenticated Access Guard & SaaS Gateway
+# -----------------------------------------------------------------------------
+if not st.session_state.authenticated:
+    render_unauthenticated_sidebar()
+    if st.session_state.auth_mode == "welcome":
+        render_welcome_page()
+    elif st.session_state.auth_mode == "signin":
+        render_signin_page()
+    elif st.session_state.auth_mode == "register":
+        render_register_page()
+    elif st.session_state.auth_mode == "forgot":
+        render_forgot_password_page()
+    st.stop()
+
+
+# -----------------------------------------------------------------------------
+# 3. Authenticated Sidebar Navigation & Quick Test Library
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -307,13 +343,14 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Primary Navigation Menu (6 Clean Sections)
+    # Primary Navigation Menu (With Personal Profile & Settings)
     nav_options = [
         "🏠 Dashboard",
         "✨ Enhance Image",
         "⚖️ Compare Methods",
         "📊 Evaluation Lab",
         "🕒 Processing History",
+        "👤 Profile & Settings",
         "📖 About Project"
     ]
 
@@ -368,16 +405,22 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    # User Profile Card at bottom of sidebar (Screenshot 3 style)
+    st.markdown("---")
+    if st.session_state.get("user"):
+        render_authenticated_user_sidebar(st.session_state.user)
+
 
 # =============================================================================
 # SECTION 1: DASHBOARD (Phase 4 & Requirement 5)
 # =============================================================================
 if st.session_state.current_page == "🏠 Dashboard":
+    user_name = st.session_state.user.get("full_name", "Researcher") if st.session_state.get("user") else "Researcher"
     # Hero Section
     st.markdown(f"""
     <div class="hero-container">
-        <div class="hero-badge">AI Super-Resolution Engine v2.0</div>
-        <div class="hero-title">Bring Every Pixel to Life.</div>
+        <div class="hero-badge">AI Super-Resolution Engine v2.0 • Personal Workspace</div>
+        <div class="hero-title">Welcome back, {user_name}! 👋</div>
         <div class="hero-subtitle">
             Transform low-resolution images into stunning high-resolution visuals using 
             deep learning. Powered by ESRGAN (RRDBNet) with 16.7M parameters and memory-efficient tiled inference.
@@ -397,8 +440,9 @@ if st.session_state.current_page == "🏠 Dashboard":
 
     st.markdown("---")
 
-    # Dynamic KPI Statistics (Computed from Real Storage & Pipeline)
-    stats = get_history_stats()
+    # Dynamic KPI Statistics (Computed from Real Storage & User-Isolated Pipeline)
+    active_user_id = st.session_state.user.get("id") if st.session_state.get("user") else None
+    stats = get_history_stats(user_id=active_user_id)
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     with kpi1:
@@ -671,7 +715,8 @@ elif st.session_state.current_page == "✨ Enhance Image":
                         "quality": out_quality
                     }
 
-                    # Add to local persistent history
+                    # Add to user-isolated persistent history
+                    active_uid = st.session_state.user.get("id") if st.session_state.get("user") else None
                     add_history_entry(
                         original_img=raw_img,
                         enhanced_img=sr_output,
@@ -679,7 +724,8 @@ elif st.session_state.current_page == "✨ Enhance Image":
                         scale_factor=selected_scale,
                         model_name="ESRGAN (RRDBNet)",
                         elapsed_sec=elapsed,
-                        device=config.get_device().type.upper()
+                        device=config.get_device().type.upper(),
+                        user_id=active_uid
                     )
 
                     st.toast(f"✅ Enhancement complete in {elapsed:.2f}s! Logged to History.", icon="🎉")
@@ -1202,7 +1248,8 @@ elif st.session_state.current_page == "🕒 Processing History":
     st.markdown("### 🕒 Image Enhancement History")
     st.caption("Locally persisted records of all super-resolution enhancements performed in this workspace.")
 
-    history_records = load_history()
+    active_user_id = st.session_state.user.get("id") if st.session_state.get("user") else None
+    history_records = load_history(user_id=active_user_id)
     h_top1, h_top2 = st.columns([3, 1])
 
     with h_top1:
@@ -1222,7 +1269,7 @@ elif st.session_state.current_page == "🕒 Processing History":
                 c_yes, c_no = st.columns(2)
                 with c_yes:
                     if st.button("Yes, Clear", type="primary", use_container_width=True):
-                        clear_history()
+                        clear_history(user_id=active_user_id)
                         st.session_state.confirm_clear = False
                         st.toast("🧹 History cleared successfully!", icon="🗑️")
                         st.rerun()
@@ -1288,11 +1335,18 @@ elif st.session_state.current_page == "🕒 Processing History":
                         key=f"dl_{rec_id}"
                     )
                 if st.button("Delete Record", key=f"del_{rec_id}"):
-                    delete_history_entry(rec_id)
+                    delete_history_entry(rec_id, user_id=active_user_id)
                     st.toast("Record deleted.", icon="🗑️")
                     st.rerun()
 
             st.markdown("<hr style='margin:16px 0;' />", unsafe_allow_html=True)
+
+
+# =============================================================================
+# SECTION: USER PROFILE & SETTINGS
+# =============================================================================
+elif st.session_state.current_page == "👤 Profile & Settings":
+    render_profile_settings_page(st.session_state.user)
 
 
 # =============================================================================
